@@ -1,0 +1,385 @@
+{
+  "name": "Real Estate – Instant Lead Response",
+  "nodes": [
+    {
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "your-webhook-path-here",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2.1,
+      "position": [0, 96],
+      "id": "node-01-webhook",
+      "name": "New Lead Intake",
+      "webhookId": "your-webhook-id-here"
+    },
+    {
+      "parameters": {
+        "mode": "runOnceForEachItem",
+        "jsCode": "const phone = $input.item.json.body.phone || '';\nconst email = $input.item.json.body.email || '';\nconst cleanPhone = phone.replace(/[\\s()-]/g, '');\n\nconst phoneFormatValid = /^\\+?[1-9]\\d{7,14}$/.test(cleanPhone);\n\n// Strip leading +1 (US country code) to get the 10-digit number\nconst digitsOnly = cleanPhone.replace(/^\\+?1?/, '');\n\nconst areaCode = digitsOnly.slice(0, 3);\nconst exchange = digitsOnly.slice(3, 6);\nconst subscriber = digitsOnly.slice(6, 10);\n\nconst allSameDigit = /^(\\d)\\1+$/.test(digitsOnly);\nconst isSequential = digitsOnly === '1234567890' || digitsOnly === '0123456789';\n\n// 555 is not a real assignable US area code — reject it outright\nconst isFakeAreaCode = areaCode === '555';\n\n// Classic reserved fake range: exchange 555, subscriber 0100-0199\nconst isReservedFake = exchange === '555' && /^01\\d{2}$/.test(subscriber);\n\n// Real numbers essentially never end in four zeros\nconst subscriberAllZeros = subscriber === '0000';\n\nconst phoneValid = phoneFormatValid && !allSameDigit && !isSequential && !isFakeAreaCode && !isReservedFake && !subscriberAllZeros;\nconst emailValid = /^[^\\s@]+@[^\\s@]+\\.[^\\s@]+$/.test(email);\n\nreturn {\n  json: {\n    ...$input.item.json.body,\n    phoneValid,\n    emailValid,\n    isValid: phoneValid && emailValid\n  }\n};"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [224, 96],
+      "id": "node-02-validate",
+      "name": "Validate Lead Data"
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 3
+          },
+          "conditions": [
+            {
+              "id": "cond-01",
+              "leftValue": "={{ $json.isValid }}",
+              "rightValue": "",
+              "operator": {
+                "type": "boolean",
+                "operation": "true",
+                "singleValue": true
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.3,
+      "position": [448, 96],
+      "id": "node-03-is-valid",
+      "name": "Is Lead Valid?"
+    },
+    {
+      "parameters": {
+        "operation": "append",
+        "documentId": {
+          "__rl": true,
+          "value": "REPLACE_WITH_YOUR_SHEET_ID",
+          "mode": "list"
+        },
+        "sheetName": {
+          "__rl": true,
+          "value": "gid=0",
+          "mode": "list"
+        },
+        "columns": {
+          "mappingMode": "defineBelow",
+          "value": {
+            "name": "={{ $('Validate Lead Data').item.json.name }}",
+            "phone": "={{ $('Validate Lead Data').item.json.phone }}",
+            "email": "={{ $('Validate Lead Data').item.json.email }}",
+            "source": "={{ $('Validate Lead Data').item.json.source }}",
+            "message": "={{ $('Validate Lead Data').item.json.message }}",
+            "lead status": "={{ $('Validate Lead Data').item.json.leadstatus }}",
+            "last contacted": "={{ $('Validate Lead Data').item.json.lastcontact }}",
+            "email valid": "={{ $('Validate Lead Data').item.json.emailValid }}"
+          },
+          "matchingColumns": [],
+          "schema": [
+            { "id": "name", "displayName": "name", "required": false, "defaultMatch": false, "display": true, "type": "string", "canBeUsedToMatch": true, "removed": false },
+            { "id": "phone", "displayName": "phone", "required": false, "defaultMatch": false, "display": true, "type": "string", "canBeUsedToMatch": true, "removed": false },
+            { "id": "email", "displayName": "email", "required": false, "defaultMatch": false, "display": true, "type": "string", "canBeUsedToMatch": true, "removed": false },
+            { "id": "source", "displayName": "source", "required": false, "defaultMatch": false, "display": true, "type": "string", "canBeUsedToMatch": true, "removed": false },
+            { "id": "message", "displayName": "message", "required": false, "defaultMatch": false, "display": true, "type": "string", "canBeUsedToMatch": true, "removed": false },
+            { "id": "lead status", "displayName": "lead status", "required": false, "defaultMatch": false, "display": true, "type": "string", "canBeUsedToMatch": true, "removed": false },
+            { "id": "last contacted", "displayName": "last contacted", "required": false, "defaultMatch": false, "display": true, "type": "string", "canBeUsedToMatch": true, "removed": false },
+            { "id": "email valid", "displayName": "email valid", "required": false, "defaultMatch": false, "display": true, "type": "string", "canBeUsedToMatch": true, "removed": false }
+          ],
+          "attemptToConvertTypes": false,
+          "convertFieldsToString": false
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4.7,
+      "position": [736, 0],
+      "id": "node-04-log-invalid",
+      "name": "Log Invalid lead for review",
+      "credentials": {}
+    },
+    {
+      "parameters": {
+        "modelId": {
+          "__rl": true,
+          "value": "models/gemini-2.5-flash",
+          "mode": "list"
+        },
+        "messages": {
+          "values": [
+            {
+              "content": "=You are a lead-qualification assistant for a real estate agent. Given this lead message, classify urgency as HOT or NORMAL. HOT means: mentions a specific budget, says 'ASAP'/'urgent'/'this week', mentions a specific property/address, or expresses strong buying intent. Otherwise NORMAL. Respond with only one word: HOT or NORMAL. Lead message:{{ $json.message }} "
+            }
+          ]
+        },
+        "builtInTools": {},
+        "options": {}
+      },
+      "type": "@n8n/n8n-nodes-langchain.googleGemini",
+      "typeVersion": 1.1,
+      "position": [672, 192],
+      "id": "node-05-gemini",
+      "name": "Classify Lead Urgency (AI)",
+      "credentials": {}
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": false,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 3
+          },
+          "conditions": [
+            {
+              "id": "cond-02",
+              "leftValue": "={{ $json.content.parts[0].text }}",
+              "rightValue": "HOT",
+              "operator": {
+                "type": "string",
+                "operation": "contains"
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.3,
+      "position": [1024, 192],
+      "id": "node-06-is-hot",
+      "name": "Is Lead Hot?"
+    },
+    {
+      "parameters": {
+        "sendTo": "agent@example.com",
+        "subject": "=HOT LEAD: {{ $('New Lead Intake').item.json.body.name }}.",
+        "message": "=Hot lead just came in — Name: {{ $('New Lead Intake').item.json.body.name }} Phone: {{ $('New Lead Intake').item.json.body.phone }} Message: {{ $('New Lead Intake').item.json.body.message }}",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.gmail",
+      "typeVersion": 2.2,
+      "position": [1248, 128],
+      "id": "node-07-hot-alert",
+      "name": "Alert Agent: Hot Lead",
+      "credentials": {}
+    },
+    {
+      "parameters": {
+        "operation": "append",
+        "documentId": {
+          "__rl": true,
+          "value": "REPLACE_WITH_YOUR_SHEET_ID",
+          "mode": "list"
+        },
+        "sheetName": {
+          "__rl": true,
+          "value": "gid=0",
+          "mode": "list"
+        },
+        "columns": {
+          "mappingMode": "defineBelow",
+          "value": {
+            "Phone": "={{ $('New Lead Intake').item.json.body.phone }}",
+            "Email": "={{ $('New Lead Intake').item.json.body.email }}",
+            "Source": "={{ $('New Lead Intake').item.json.body.source }}",
+            "Message": "={{ $('New Lead Intake').item.json.body.message }}",
+            "Name": "={{ $('New Lead Intake').item.json.body.name }}",
+            "Lead status": "New",
+            "Time stamp": "={{ $now.format('yyyy-MM-dd HH:mm') }}"
+          },
+          "matchingColumns": [],
+          "schema": [
+            { "id": "Time stamp", "displayName": "Time stamp", "required": false, "defaultMatch": false, "display": true, "type": "string", "canBeUsedToMatch": true },
+            { "id": "Name", "displayName": "Name", "required": false, "defaultMatch": false, "display": true, "type": "string", "canBeUsedToMatch": true },
+            { "id": "Phone", "displayName": "Phone", "required": false, "defaultMatch": false, "display": true, "type": "string", "canBeUsedToMatch": true },
+            { "id": "Email", "displayName": "Email", "required": false, "defaultMatch": false, "display": true, "type": "string", "canBeUsedToMatch": true },
+            { "id": "Source", "displayName": "Source", "required": false, "defaultMatch": false, "display": true, "type": "string", "canBeUsedToMatch": true },
+            { "id": "Message", "displayName": "Message", "required": false, "defaultMatch": false, "display": true, "type": "string", "canBeUsedToMatch": true },
+            { "id": "Lead status", "displayName": "Lead status", "required": false, "defaultMatch": false, "display": true, "type": "string", "canBeUsedToMatch": true }
+          ],
+          "attemptToConvertTypes": false,
+          "convertFieldsToString": false
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4.7,
+      "position": [1472, 192],
+      "id": "node-08-log-lead",
+      "name": "Log Lead to Sheet",
+      "credentials": {}
+    },
+    {
+      "parameters": {},
+      "type": "n8n-nodes-base.noOp",
+      "typeVersion": 1,
+      "position": [1696, 192],
+      "id": "node-09-sms-placeholder",
+      "name": "SMS Response (Pending Twilio Setup)"
+    },
+    {
+      "parameters": {
+        "sendTo": "={{ $('New Lead Intake').item.json.body.email }}",
+        "subject": "=Hi {{ $('Validate Lead Data').item.json.name }},",
+        "message": "=Thanks for reaching out! I saw your message and wanted to follow up right away:\n\"{{ $('New Lead Intake').item.json.body.message }}\"\n\nI'll personally reach out to you shortly to answer any questions and set up a time to talk or view the property. If you'd like to skip ahead, feel free to book a time directly here: [YOUR_BOOKING_LINK]\n\nLooking forward to helping you find the right fit!\n\nBest,\n[Your Name]\n[Your Phone]\n[Your Brokerage]",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.gmail",
+      "typeVersion": 2.2,
+      "position": [1920, 192],
+      "id": "node-10-lead-reply",
+      "name": "Send Instant Lead Reply",
+      "credentials": {}
+    },
+    {
+      "parameters": {
+        "amount": 24,
+        "unit": "hours"
+      },
+      "type": "n8n-nodes-base.wait",
+      "typeVersion": 1.1,
+      "position": [2144, 192],
+      "id": "node-11-wait",
+      "name": "Wait 24-48 Hours",
+      "webhookId": "your-webhook-id-here"
+    },
+    {
+      "parameters": {
+        "documentId": {
+          "__rl": true,
+          "value": "REPLACE_WITH_YOUR_SHEET_ID",
+          "mode": "list"
+        },
+        "sheetName": {
+          "__rl": true,
+          "value": "gid=0",
+          "mode": "list"
+        },
+        "filtersUI": {
+          "values": [
+            {
+              "lookupColumn": "Email",
+              "lookupValue": "={{ $('New Lead Intake').item.json.body.email }}"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4.7,
+      "position": [2368, 192],
+      "id": "node-12-recheck",
+      "name": "Re-Check Lead Status",
+      "credentials": {}
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 3
+          },
+          "conditions": [
+            {
+              "id": "cond-03",
+              "leftValue": "={{ $json['Lead status'] }}",
+              "rightValue": "New",
+              "operator": {
+                "type": "string",
+                "operation": "equals"
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.3,
+      "position": [2592, 192],
+      "id": "node-13-unanswered",
+      "name": "Still Unanswered?"
+    },
+    {
+      "parameters": {
+        "sendTo": "={{ $('New Lead Intake').item.json.body.email }}",
+        "subject": "=Just checking in, {{ $('New Lead Intake').item.json.body.name }}!",
+        "message": "=Hi {{ $('New Lead Intake').item.json.body.name }}, wanted to follow up on your interest — still looking? Happy to answer any questions or set up a time to talk!",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.gmail",
+      "typeVersion": 2.2,
+      "position": [2816, 192],
+      "id": "node-14-followup",
+      "name": "Send Follow-Up Email",
+      "credentials": {}
+    }
+  ],
+  "pinData": {},
+  "connections": {
+    "New Lead Intake": {
+      "main": [[{ "node": "Validate Lead Data", "type": "main", "index": 0 }]]
+    },
+    "Validate Lead Data": {
+      "main": [[{ "node": "Is Lead Valid?", "type": "main", "index": 0 }]]
+    },
+    "Is Lead Valid?": {
+      "main": [
+        [{ "node": "Classify Lead Urgency (AI)", "type": "main", "index": 0 }],
+        [{ "node": "Log Invalid lead for review", "type": "main", "index": 0 }]
+      ]
+    },
+    "Classify Lead Urgency (AI)": {
+      "main": [[{ "node": "Is Lead Hot?", "type": "main", "index": 0 }]]
+    },
+    "Is Lead Hot?": {
+      "main": [
+        [{ "node": "Alert Agent: Hot Lead", "type": "main", "index": 0 }],
+        [{ "node": "Log Lead to Sheet", "type": "main", "index": 0 }]
+      ]
+    },
+    "Alert Agent: Hot Lead": {
+      "main": [[{ "node": "Log Lead to Sheet", "type": "main", "index": 0 }]]
+    },
+    "Log Lead to Sheet": {
+      "main": [[{ "node": "SMS Response (Pending Twilio Setup)", "type": "main", "index": 0 }]]
+    },
+    "SMS Response (Pending Twilio Setup)": {
+      "main": [[{ "node": "Send Instant Lead Reply", "type": "main", "index": 0 }]]
+    },
+    "Send Instant Lead Reply": {
+      "main": [[{ "node": "Wait 24-48 Hours", "type": "main", "index": 0 }]]
+    },
+    "Wait 24-48 Hours": {
+      "main": [[{ "node": "Re-Check Lead Status", "type": "main", "index": 0 }]]
+    },
+    "Re-Check Lead Status": {
+      "main": [[{ "node": "Still Unanswered?", "type": "main", "index": 0 }]]
+    },
+    "Still Unanswered?": {
+      "main": [[{ "node": "Send Follow-Up Email", "type": "main", "index": 0 }]]
+    }
+  },
+  "active": false,
+  "settings": {
+    "executionOrder": "v1",
+    "binaryMode": "separate"
+  },
+  "versionId": "version-1",
+  "meta": {
+    "templateCredsSetupCompleted": false
+  },
+  "id": "template-lead-response",
+  "tags": []
+}
